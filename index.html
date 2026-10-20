@@ -1,0 +1,916 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Production Scheduler</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --red: #ED2929;
+  --red-soft: rgba(237, 41, 41, 0.10);
+  --amber: #E07B00;
+  --amber-soft: rgba(224, 123, 0, 0.12);
+  --green: #2E8B57;
+  --green-soft: rgba(46, 139, 87, 0.12);
+  --ink: #222222;
+  --text: #444444;
+  --muted: #5E5E5E;
+  --line: #E2E2E2;
+  --line-strong: #CFCFCF;
+  --bg: #F3F3F3;
+  --surface: #FFFFFF;
+  --surface-2: #FAFAFA;
+  --header: #151515;
+  --bar: #2B2B2B;
+  --radius: 10px;
+  --left: 370px;
+  --day: 8px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: Outfit, system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  font-size: 16px;
+}
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+/* Header */
+.topbar {
+  background: var(--header);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 20px;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+.brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.brand svg { height: 30px; width: auto; flex: none; }
+.brand-text { line-height: 1.1; }
+.brand-text strong { display: block; font-size: 19px; font-weight: 600; letter-spacing: 0.2px; }
+.brand-text span { font-size: 14px; color: rgba(255,255,255,0.6); }
+.topbar .spacer { flex: 1; }
+.role-pick { display: flex; align-items: center; gap: 8px; font-size: 15px; color: rgba(255,255,255,0.7); }
+.role-pick select {
+  background: #262626; color: #fff; border: 1px solid #3a3a3a; border-radius: 999px;
+  padding: 7px 14px; font-weight: 500;
+}
+.btn {
+  border: 1px solid var(--line-strong); background: var(--surface); border-radius: 999px;
+  padding: 7px 14px; font-weight: 500; font-size: 15px;
+}
+.btn:hover { border-color: var(--ink); }
+.btn-dark { background: transparent; color: #fff; border-color: #3a3a3a; }
+.btn-dark:hover { border-color: #fff; }
+.btn-red { background: var(--red); border-color: var(--red); color: #fff; }
+.sample-tag {
+  background: var(--red); color: #fff; font-size: 13px; font-weight: 700; letter-spacing: 0.6px;
+  padding: 4px 10px; border-radius: 999px; text-transform: uppercase;
+}
+
+/* The page fills the window exactly: header, then main (which scrolls if it must), then footer */
+body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+.topbar, footer { flex: none; }
+main { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; width: 100%; box-sizing: border-box; padding: 18px 20px 12px; max-width: 1600px; margin: 0 auto; }
+main > * { flex: none; }
+main > .board { flex: 1 1 auto; }
+
+
+/* Summary */
+.summary { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
+.stat {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px 16px; min-width: 150px; text-align: left; cursor: pointer;
+}
+.stat:hover { border-color: var(--line-strong); }
+.stat.active { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.stat .num { font-size: 28px; font-weight: 600; color: var(--ink); line-height: 1.1; }
+.stat .lbl { font-size: 14px; color: var(--muted); }
+.stat.blocked .num { color: var(--red); }
+.stat.late .num { color: var(--amber); }
+.stat.ok .num { color: var(--green); }
+.summary .note { color: var(--muted); font-size: 14px; margin-left: auto; }
+.add-actions { display: flex; gap: 10px; }
+.add-actions .btn { height: 44px; padding: 0 18px; font-size: 15px; font-weight: 600; }
+.btn-primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+.btn-primary:hover { background: #000; }
+.prow.flash, .prow.flash .cell-left { animation: flash 1.6s ease-out; }
+@keyframes flash { from { background: #FFF3C4; } to { background: transparent; } }
+.panel-actions { margin-top: 28px; }
+
+/* Board */
+.board {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  overflow: auto; position: relative; min-height: 240px;
+}
+.grid { position: relative; }
+.row { display: flex; border-bottom: 1px solid var(--line); position: relative; width: max-content; min-width: 100%; }
+.row.head { position: sticky; top: 0; z-index: 12; background: var(--surface); border-bottom: 1px solid var(--line-strong); }
+.cell-left {
+  width: var(--left); flex: none; position: sticky; left: 0; z-index: 8; background: var(--surface);
+  border-right: 1px solid var(--line-strong); padding: 8px 10px 8px 8px; display: flex; align-items: center; gap: 8px;
+}
+.row.head .cell-left { z-index: 14; font-size: 14px; color: var(--muted); font-weight: 500; }
+.track { position: relative; flex: none; }
+.months { height: 26px; position: relative; border-bottom: 1px solid var(--line); overflow: hidden; }
+.weeks { height: 26px; position: relative; }
+.mlabel { position: absolute; top: 4px; font-size: 14px; font-weight: 600; color: var(--ink); padding-left: 6px; border-left: 1px solid var(--line-strong); height: 20px; white-space: nowrap; }
+.wlabel { position: absolute; top: 4px; font-size: 13px; color: var(--muted); padding-left: 4px; white-space: nowrap; }
+.wline { position: absolute; top: 0; bottom: 0; width: 1px; background: #F0F0F0; }
+.today-line { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--red); opacity: 0.55; z-index: 5; pointer-events: none; }
+.today-tag { position: absolute; top: 2px; transform: translateX(-50%); background: var(--red); color: #fff; font-size: 12px; font-weight: 700; padding: 1px 6px; border-radius: 999px; z-index: 6; }
+
+.prow { height: 58px; cursor: default; }
+.prow:hover .cell-left, .prow:hover { background: var(--surface-2); }
+.prow.sel .cell-left { background: #FFF5F5; }
+.prow.sel { background: #FFF9F9; }
+.prow .cell-left { cursor: pointer; }
+.chev { width: 28px; height: 28px; border: none; background: none; border-radius: 6px; color: var(--muted); flex: none; display: grid; place-items: center; padding: 0; }
+.chev:hover { background: var(--bg); color: var(--ink); }
+.chev svg { transition: transform .15s; }
+.open .chev svg { transform: rotate(90deg); }
+.pname { flex: 1; min-width: 0; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 16px; }
+.prow .track { cursor: grab; }
+.board.panning, .board.panning * { cursor: grabbing !important; user-select: none; }
+.col-resize { position: absolute; top: 0; bottom: 0; right: -5px; width: 10px; cursor: col-resize; z-index: 15; }
+.col-resize::after { content: ""; position: absolute; top: 25%; bottom: 25%; left: 4px; width: 2px; border-radius: 2px; background: transparent; }
+.col-resize:hover::after, .resizing .col-resize::after { background: var(--red); }
+.resizing, .resizing * { cursor: col-resize !important; user-select: none; }
+.pill { font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 999px; white-space: nowrap; flex: none; }
+.pill.blocked { background: var(--red-soft); color: var(--red); }
+.pill.late { background: var(--amber-soft); color: var(--amber); }
+.pill.ok { background: var(--green-soft); color: var(--green); }
+.pill.both { background: var(--red); color: #fff; }
+
+.bar {
+  position: absolute; top: 14px; height: 30px; border-radius: 7px; background: var(--bar); color: #fff;
+  font-size: 11.5px; font-weight: 500; padding: 0 8px; display: flex; align-items: center; white-space: nowrap;
+  overflow: hidden; cursor: grab; z-index: 4; user-select: none; touch-action: none;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+}
+.bar:hover { box-shadow: 0 0 0 2px rgba(0,0,0,0.15), 0 2px 6px rgba(0,0,0,0.2); }
+.bar.ok { background: var(--green); }
+.bar.blocked { background: var(--red); }
+.bar.late { background: var(--amber); }
+.grip { position: absolute; top: 0; bottom: 0; width: 12px; cursor: ew-resize; z-index: 2; }
+.grip-l { left: 0; }
+.grip-r { right: 0; }
+.grip::after { content: ""; position: absolute; top: 8px; bottom: 8px; width: 2px; border-radius: 2px; background: rgba(255,255,255,0.55); }
+.grip-l::after { left: 4px; }
+.grip-r::after { right: 4px; }
+.bar:hover .grip::after { background: #fff; }
+.bar.dragging { cursor: grabbing; opacity: 0.92; box-shadow: 0 6px 16px rgba(0,0,0,0.25); z-index: 20; }
+.due {
+  position: absolute; top: 8px; bottom: 8px; width: 0; border-left: 2px dashed var(--ink); z-index: 5; pointer-events: none;
+}
+.due::after {
+  content: attr(data-label); white-space: nowrap; position: absolute; top: 50%; transform: translateY(-50%); left: 6px;
+  font-size: 14px; font-weight: 600; color: var(--ink); background: rgba(255,255,255,0.9); padding: 0 4px; border-radius: 3px;
+}
+
+/* Expanded parts rows */
+.crow { height: 40px; background: var(--surface-2); }
+.crow .cell-left { background: var(--surface-2); padding-left: 38px; font-size: 15px; cursor: pointer; }
+.crow .cname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink); font-weight: 500; }
+.crow .csrc { font-size: 14px; color: #5E5E5E; white-space: nowrap; }
+.dot {
+  position: absolute; top: 20px; width: 12px; height: 12px; border-radius: 50%; background: #9A9A9A; border: 2px solid #fff;
+  transform: translate(-50%, -50%); z-index: 4; box-shadow: 0 0 0 1px #9A9A9A;
+}
+.dlabel {
+  position: absolute; top: 20px; transform: translateY(-50%); margin-left: 11px; z-index: 4; white-space: nowrap;
+  font-size: 14px; font-weight: 600; color: #5E5E5E; background: var(--surface-2); padding: 0 3px; border-radius: 3px; pointer-events: none;
+}
+.dlabel.done { color: var(--green); }
+.dlabel.blocking { color: var(--red); }
+.dot.done { background: var(--green); box-shadow: 0 0 0 1px var(--green); }
+.dot.blocking { background: var(--red); box-shadow: 0 0 0 1px var(--red); }
+
+.drag-tip {
+  position: fixed; z-index: 60; background: var(--ink); color: #fff; font-size: 14px; padding: 6px 10px; border-radius: 8px;
+  pointer-events: none; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+}
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; color: var(--muted); margin-top: 10px; align-items: center; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.lg-bar { width: 22px; height: 10px; border-radius: 3px; background: var(--bar); display: inline-block; }
+.lg-due { width: 0; height: 12px; border-left: 2px dashed var(--ink); display: inline-block; }
+
+/* Side panel */
+.scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.25); z-index: 40; opacity: 0; pointer-events: none; transition: opacity .2s; }
+.scrim.show { opacity: 1; pointer-events: auto; }
+.panel {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100vw); background: var(--surface); z-index: 50;
+  box-shadow: -8px 0 30px rgba(0,0,0,0.18); transform: translateX(105%); transition: transform .22s ease;
+  display: flex; flex-direction: column;
+}
+.panel.show { transform: none; }
+.panel-head { padding: 24px 28px 20px; border-bottom: 1px solid var(--line); }
+.panel-head .kicker { font-size: 13px; font-weight: 700; color: var(--red); letter-spacing: 0.8px; text-transform: uppercase; }
+.panel-head h3 { margin: 4px 0 2px; font-size: 22px; color: var(--ink); font-weight: 600; }
+.panel-head .sub { color: var(--muted); font-size: 15px; }
+.panel-head .x { position: absolute; top: 14px; right: 14px; border: none; background: var(--bg); width: 32px; height: 32px; border-radius: 50%; font-size: 18px; line-height: 1; }
+.panel-body { padding: 8px 28px 40px; overflow: auto; flex: 1; }
+.section-title { font-size: 14px; font-weight: 700; color: var(--ink); text-transform: uppercase; letter-spacing: 0.8px; margin: 26px 0 14px; }
+.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 20px; }
+.field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.field.full { grid-column: 1 / -1; }
+.field > span { font-size: 14px; color: var(--muted); font-weight: 500; }
+.parts { display: flex; flex-direction: column; gap: 14px; }
+.part-card { border: 1px solid var(--line); border-radius: 12px; padding: 18px; background: var(--surface-2); }
+.card-actions { display: flex; justify-content: center; margin-top: 12px; }
+.btn-remove {
+  border: none; background: none; color: #8E3B3B; font-size: 13px; font-weight: 600; padding: 5px 10px; border-radius: 8px;
+}
+.btn-remove:hover { background: rgba(142, 59, 59, 0.08); }
+.btn-add {
+  height: 52px; border: 2px dashed var(--line-strong); border-radius: 12px; background: #fff;
+  font-size: 16px; font-weight: 600; color: var(--ink);
+}
+.btn-add:hover { border-color: var(--ink); background: var(--surface-2); }
+
+/* One style for every dropdown and date box */
+.ctl {
+  width: 100%; height: 44px; border: 1.5px solid var(--line-strong); border-radius: 10px; background-color: #fff;
+  padding: 0 12px; font-size: 16px; font-weight: 500; color: var(--ink); transition: border-color .15s, box-shadow .15s;
+}
+.ctl:hover { border-color: #9A9A9A; }
+.ctl:focus { outline: none; border-color: var(--ink); box-shadow: 0 0 0 3px rgba(34,34,34,0.12); }
+select.ctl, .qtable select {
+  appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 40px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'%3E%3Cpath d='M3 5l4 4 4-4' fill='none' stroke='%23444' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 14px center;
+}
+input[type=date].ctl::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.6; }
+.role-pick select {
+  appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 36px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'%3E%3Cpath d='M3 5l4 4 4-4' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center;
+}
+.st { font-size: 13px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--bg); color: var(--muted); white-space: nowrap; }
+.st.Done, .st.Received { background: var(--green-soft); color: var(--green); }
+.st.In-progress, .st.Shipped { background: #EEF3FF; color: #2F55B5; }
+
+/* Queue view */
+.queue-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+.queue-head h2 { margin: 0; font-size: 26px; color: var(--ink); font-weight: 600; }
+.queue-head p { margin: 2px 0 0; color: var(--muted); }
+.qcard { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; }
+.qtable { width: 100%; border-collapse: collapse; min-width: 760px; }
+.qtable th { text-align: left; font-size: 13px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 12px; border-bottom: 1px solid var(--line-strong); background: var(--surface-2); }
+.qtable td { padding: 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.qtable tr.behind td:first-child { box-shadow: inset 4px 0 0 var(--red); }
+.qtable tr.isdone td { opacity: 0.55; }
+.qtable .rank { font-weight: 700; color: var(--ink); font-size: 18px; width: 44px; }
+.qtable .item { color: var(--ink); font-weight: 600; }
+.qtable .small { font-size: 14px; color: var(--muted); }
+.qtable select { border: 1px solid var(--line-strong); border-radius: 999px; padding: 5px 10px; background: #fff; font-weight: 500; font-size: 15px; }
+.qtable select.s-In-progress { border-color: #2F55B5; color: #2F55B5; }
+.qtable select.s-Done { border-color: var(--green); color: var(--green); }
+.empty-board { display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; }
+.empty-inner { max-width: none; }
+.empty-inner h2 { margin: 0 0 10px; font-size: 26px; color: var(--ink); font-weight: 600; }
+.empty-inner p { margin: 0 0 24px; font-size: 17px; color: var(--muted); line-height: 1.5; white-space: nowrap; }
+.empty-inner .add-actions { justify-content: center; }
+.empty { padding: 48px 24px; text-align: center; color: var(--muted); font-size: 16px; position: sticky; left: 0; z-index: 9; background: var(--surface); }
+
+footer { text-align: center; color: var(--muted); font-size: 14px; padding: 6px 20px 12px; }
+footer b { color: var(--ink); font-weight: 600; }
+
+/* Below desktop width the demo is replaced by a single message */
+.small-screen { display: none; }
+@media (max-width: 1023px) {
+  body > *:not(.small-screen) { display: none !important; }
+  .small-screen {
+    display: flex; flex: 1; align-items: center; justify-content: center; text-align: center;
+    padding: 32px 24px; background: var(--bg);
+  }
+  .small-screen h1 { margin: 0 0 12px; font-size: 26px; color: var(--ink); font-weight: 600; }
+  .small-screen p { margin: 0; font-size: 18px; color: var(--muted); line-height: 1.5; max-width: 420px; }
+}
+@media (max-width: 760px) {
+  :root { --left: 170px; }
+  .topbar { flex-wrap: wrap; padding: 10px 16px; gap: 10px; }
+  .brand-text span { display: none; }
+  main { padding: 14px 16px 30px; }
+  .summary .note { margin-left: 0; }
+  .stat { min-width: 0; flex: 1 1 40%; }
+  .prow .pill { display: none; }
+}
+.dot.delayed { background: var(--red); box-shadow: 0 0 0 1px var(--red); }
+.dlabel.delayed { color: var(--red); }
+.st.Delayed { border-color: var(--red); color: var(--red); }
+/* status dropdowns are tinted by their current value */
+.pselect { font-weight: 600; }
+.pselect.s-ok, .pselect.s-Done, .pselect.s-Received { border-color: var(--green); color: var(--green); background-color: #F3FAF6; }
+.pselect.s-blocked, .pselect.s-Delayed { border-color: var(--red); color: #C81E1E; background-color: #FEF4F4; }
+.pselect.s-late { border-color: var(--amber); color: #B26100; background-color: #FFF7EC; }
+.pselect.s-In-progress, .pselect.s-Shipped { border-color: #2F55B5; color: #2F55B5; background-color: #F3F6FF; }
+.pselect option { color: var(--ink); background: #fff; }
+</style>
+</head>
+<body>
+<div class="small-screen" role="alert"><div><h1>Production Scheduler</h1><p>Please revisit at desktop width for the full demo experience.</p></div></div>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-text"><strong>Production Scheduler</strong></div>
+  </div>
+  <div class="spacer"></div>
+  <label class="role-pick">Viewing as
+    <select id="role"></select>
+  </label>
+  <button class="btn btn-dark" id="reset" title="Restore the original sample data">Reset demo</button>
+</header>
+
+<main id="app"></main>
+<footer>Prototype by <b>Tandem Studios</b> · All projects, customers and dates are sample data · Changes are saved in this browser only</footer>
+
+<div class="scrim" id="scrim"></div>
+<aside class="panel" id="panel" aria-hidden="true"></aside>
+
+<script>
+(() => {
+  'use strict';
+
+  const STORE_KEY = 'production-scheduler-demo-v2';
+  const DAY_MS = 86400000;
+
+  const SHOPS = [
+    { id: 's1', name: 'Shop #1' },
+    { id: 's2', name: 'Shop #2' },
+    { id: 's3', name: 'Shop #3' },
+    { id: 's4', name: 'Shop #4' },
+    { id: 's5', name: 'Shop #5' },
+  ];
+  // Sample suppliers, in numbering order (names stay descriptive in the seed for readability).
+  const SUPPLIERS = ['Pacific Gear & Drive', 'Northline Enclosures', 'SafeGuard Sensors', 'Coastal Container Co.'];
+  const shopName = id => (SHOPS.find(s => s.id === id) || {}).name || id;
+
+  // Everything is set by hand: the demo shows what people enter and does no scheduling maths.
+  const PROJECT_STATUSES = ['On track', 'Blocked', 'Late'];
+  const SHOP_STATUSES = ['Not started', 'In progress', 'Delayed', 'Done'];
+  const SUPPLIER_STATUSES = ['Ordered', 'Shipped', 'Delayed', 'Received'];
+  const statusClass = { 'On track': 'ok', 'Blocked': 'blocked', 'Late': 'late' };
+  const partStatuses = c => c.kind === 'shop' ? SHOP_STATUSES : SUPPLIER_STATUSES;
+  const dotClass = c => (c.status === 'Done' || c.status === 'Received') ? 'done' : c.status === 'Delayed' ? 'delayed' : '';
+  const stClass = s => s.replace(' ', '-');
+
+  // ---- dates: whole days since epoch (UTC) ----
+  const todayDay = (() => { const d = new Date(); return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY_MS); })();
+  const toDate = day => new Date(day * DAY_MS);
+  const fmt = day => toDate(day).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const fmtLong = day => toDate(day).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+  const toISO = day => toDate(day).toISOString().slice(0, 10);
+  const fromISO = s => Math.floor(Date.parse(s + 'T00:00:00Z') / DAY_MS);
+  const money = v => '$' + v.toLocaleString('en-US');
+
+  // ---- data: the board starts empty; projects are added by hand or as autofilled demos ----
+  function seed() { return { version: 8, nextId: 2601, projects: [] }; }
+
+  const newId = () => 'P-' + (state.nextId++);
+  const partId = () => 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  function blankProject() {
+    const start = todayDay;
+    return {
+      id: newId(), number: '', customer: 'New project', title: '', site: '', value: 0,
+      start, end: start + 28, due: start + 35, status: 'On track', components: [],
+      buildShop: 's5', buildEta: start + 28, assemblyStatus: 'Not started',
+    };
+  }
+
+  // Invented but plausible sample content for "Add demo project"
+  const DEMO = {
+    customers: ['Riverside Medical Center', 'Golden Crust Bakery Co.', 'Northgate Regional Hospital', 'Harbor Point Apartments',
+      'Cascade State University', 'Summit Foods Processing', 'Ironwood Manufacturing', 'Lakeview School District',
+      'Pinecrest Distribution Center', 'Evergreen Grocers DC', 'Bayside Logistics Hub', 'Marlow Packaging',
+      'Silver Creek Brewery', 'Westfield Mall Group', 'Cedar Valley Hospital', 'Redrock Correctional Facility'],
+    // generic product names, so nothing in the demo points to a particular manufacturer
+    models: ['Model #1', 'Model #2', 'Model #3', 'Model #4', 'Model #5', 'Model #6', 'Model #2 + Model #7', 'Model #4 + Model #8'],
+    sites: ['Olympia, WA', 'Portland, OR', 'Spokane, WA', 'Tacoma, WA', 'Ellensburg, WA', 'Boise, ID', 'Gastonia, NC',
+      'Bellingham, WA', 'Kent, WA', 'Salem, OR', 'Oakland, CA', 'Reno, NV'],
+  };
+  const rand = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+  const pick = list => list[rand(0, list.length - 1)];
+
+  function demoProject() {
+    const used = new Set(state.projects.map(p => p.customer));
+    const fresh = DEMO.customers.filter(c => !used.has(c));
+    const start = todayDay + rand(-21, 120);
+    const end = start + rand(4, 7) * 7;
+    const status = pick(['On track', 'On track', 'On track', 'On track', 'Blocked', 'Late']);
+    const n = rand(4, 8);
+    const sources = [...SHOPS.slice(0, 4).map(s => ['shop', s.id]), ...SUPPLIERS.map((s, i) => ['supplier', 'Supplier #' + (i + 1)])];
+    const components = Array.from({ length: n }, () => {
+      const [kind, who] = pick(sources);
+      const eta = rand(start + 3, end - 7);
+      return { kind, who, eta };
+    }).sort((m, k) => m.eta - k.eta).map((c, i) => {
+      const d = c.eta - todayDay;
+      const status = c.kind === 'shop' ? (d <= 0 ? 'Done' : d <= 10 ? 'In progress' : 'Not started')
+                                       : (d <= 0 ? 'Received' : d <= 5 ? 'Shipped' : 'Ordered');
+      return { id: partId(), name: 'Part #' + (i + 1), ...c, status };
+    });
+    if (status === 'Blocked') { const c = pick(components.filter(c => c.eta > todayDay) .concat(components.slice(-1))); c.status = 'Delayed'; }
+    return {
+      id: newId(), customer: fresh.length ? pick(fresh) : pick(DEMO.customers), title: pick(DEMO.models), site: pick(DEMO.sites),
+      value: rand(200, 2000) * 100, start, end,
+      due: status === 'Late' ? end - rand(3, 10) : end + rand(5, 21),
+      status, components, buildShop: 's5', buildEta: end,
+      assemblyStatus: end - 14 <= todayDay ? 'In progress' : 'Not started',
+    };
+  }
+
+  // ---- state ----
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      if (raw) { const s = JSON.parse(raw); if (s && s.version === 8 && Array.isArray(s.projects)) return s; }
+    } catch (e) { /* storage unavailable: fall back to sample data */ }
+    return seed();
+  }
+  function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ } }
+
+  let state = load();
+  let role = 'controller';
+  let filter = 'all';
+  let selectedId = null;
+  const expanded = new Set();
+  const CHEV = '<svg width="12" height="12" viewBox="0 0 12 12"><path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  try { const r = sessionStorage.getItem('production-scheduler-role'); if (r && SHOPS.some(s => s.id === r)) role = r; } catch (e) {}
+
+  // ---- helpers ----
+  const esc = s => String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
+  const project = id => state.projects.find(p => p.id === id);
+  // the project number people see and edit; p.id stays fixed as the internal key
+  const projectNo = p => (p.number !== undefined ? p.number : p.id);
+  const sourceLabel = c => c.kind === 'shop' ? shopName(c.who) : c.who;
+  const SUPPLIER_NAMES = SUPPLIERS.map((s, i) => 'Supplier #' + (i + 1));
+  const sourceOptions = c =>
+    `<optgroup label="Shops">${SHOPS.map(s => `<option value="shop|${s.id}" ${c.kind === 'shop' && c.who === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</optgroup>` +
+    `<optgroup label="Suppliers">${SUPPLIER_NAMES.map(n => `<option value="supplier|${n}" ${c.kind === 'supplier' && c.who === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}</optgroup>`;
+  const options = (list, current) => list.map(s => `<option ${s === current ? 'selected' : ''}>${esc(s)}</option>`).join('');
+
+  // ---- role picker ----
+  const roleSel = document.getElementById('role');
+  roleSel.innerHTML = '<option value="controller">Controller (all shops)</option>' +
+    SHOPS.map(s => `<option value="${s.id}">${esc(s.name)} lead</option>`).join('');
+  roleSel.value = role;
+  roleSel.addEventListener('change', () => { role = roleSel.value; try { sessionStorage.setItem('production-scheduler-role', role); } catch (e) {} closePanel(); render(); });
+
+  document.getElementById('reset').addEventListener('click', () => {
+    if (!confirm('Remove every project and start again with an empty board? This cannot be undone.')) return;
+    try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+    state = seed(); filter = 'all'; expanded.clear(); closePanel(); render();
+  });
+
+  const app = document.getElementById('app');
+
+  function render() {
+    app.innerHTML = '';
+    if (role === 'controller') renderController(); else renderQueue(role);
+  }
+
+  // ======================= Controller: timeline board =======================
+  function renderController() {
+    const count = s => state.projects.filter(p => p.status === s).length;
+    const totalValue = state.projects.reduce((a, p) => a + p.value, 0);
+    const summary = el(`<div class="summary">
+      <button class="stat ${filter === 'all' ? 'active' : ''}" data-f="all"><div class="num">${state.projects.length}</div><div class="lbl">Projects scheduled</div></button>
+      <button class="stat ok ${filter === 'On track' ? 'active' : ''}" data-f="On track"><div class="num">${count('On track')}</div><div class="lbl">On track</div></button>
+      <button class="stat blocked ${filter === 'Blocked' ? 'active' : ''}" data-f="Blocked"><div class="num">${count('Blocked')}</div><div class="lbl">Blocked</div></button>
+      <button class="stat late ${filter === 'Late' ? 'active' : ''}" data-f="Late"><div class="num">${count('Late')}</div><div class="lbl">Late</div></button>
+      <div class="note">${money(totalValue)} in scheduled projects · Today: ${fmtLong(todayDay)}</div>
+      <div class="add-actions">
+        <button type="button" class="btn btn-primary" id="addProject">+ Add project</button>
+        <button type="button" class="btn" id="addDemo">Add demo project</button>
+      </div>
+    </div>`);
+    summary.querySelectorAll('.stat').forEach(b => b.addEventListener('click', () => { filter = b.dataset.f; render(); }));
+    const addAndShow = (p, open) => {
+      state.projects.push(p); filter = 'all'; save(); render();
+      // bring the new project's row and bar into view
+      const row = document.querySelector(`.prow[data-id="${p.id}"]`), board = document.querySelector('.board');
+      if (row && board) {
+        const left = Math.max(0, parseFloat(row.querySelector('.bar').style.left) - 60);
+        board.scrollLeft = left; lastScroll = { left, top: board.scrollTop };
+        row.scrollIntoView({ block: 'nearest' });
+        row.classList.add('flash');
+      }
+      if (open) openPanel(p.id);
+    };
+    summary.querySelector('#addProject').addEventListener('click', () => addAndShow(blankProject(), true));
+    summary.querySelector('#addDemo').addEventListener('click', () => addAndShow(demoProject(), false));
+    app.appendChild(summary);
+
+    // Empty board: a single centred message in place of the timeline
+    if (!state.projects.length) {
+      const empty = el(`<div class="board empty-board"><div class="empty-inner">
+        <h2>No projects yet</h2>
+        <p>Add a project to start scheduling, or add a demo project that fills itself in.</p>
+        <div class="add-actions">
+          <button type="button" class="btn btn-primary" data-add="blank">+ Add project</button>
+          <button type="button" class="btn" data-add="demo">Add demo project</button>
+        </div>
+      </div></div>`);
+      empty.querySelector('[data-add="demo"]').addEventListener('click', () => addAndShow(demoProject(), false));
+      empty.querySelector('[data-add="blank"]').addEventListener('click', () => addAndShow(blankProject(), true));
+      app.appendChild(empty);
+      return;
+    }
+
+    const visible = state.projects
+      .filter(p => filter === 'all' || p.status === filter)
+      .sort((a, b) => a.start - b.start || a.due - b.due);
+
+    // timeline range
+    const allDays = state.projects.flatMap(p => [p.start, p.end, p.due, ...p.components.map(c => c.eta)]);
+    let rangeStart = Math.min(todayDay - 28, ...allDays) - 7;
+    rangeStart -= ((rangeStart + 3) % 7 + 7) % 7; // align to a Monday (epoch day 0 was a Thursday)
+    const rangeEnd = Math.max(todayDay + 180, ...allDays) + 21;
+    const dayPx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--day')) || 6;
+    const width = (rangeEnd - rangeStart) * dayPx;
+    const x = day => (day - rangeStart) * dayPx;
+
+    const board = el('<div class="board"><div class="grid"></div></div>');
+    const grid = board.firstElementChild;
+
+    // header rows
+    const head = el(`<div class="row head"><div class="cell-left">Customer</div><div class="track" style="width:${width}px"><div class="months"></div><div class="weeks"></div></div></div>`);
+    const months = head.querySelector('.months'), weeks = head.querySelector('.weeks');
+    for (let d = rangeStart; d < rangeEnd; d++) {
+      const dt = toDate(d);
+      if (dt.getUTCDate() === 1 || (d === rangeStart && dt.getUTCDate() < 22)) {
+        // a month too close to the right edge keeps its divider but not its name, so the name never wraps
+        const label = rangeEnd - d >= 16 ? dt.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }) : '';
+        months.appendChild(el(`<div class="mlabel" style="left:${x(d)}px">${label}</div>`));
+      }
+      if (dt.getUTCDay() === 1) weeks.appendChild(el(`<div class="wlabel" style="left:${x(d)}px">${dt.getUTCDate()}</div>`));
+    }
+    head.querySelector('.track').appendChild(el(`<div class="today-tag" style="left:${x(todayDay)}px;top:30px">Today</div>`));
+    grid.appendChild(head);
+
+    const body = el(`<div style="position:relative"></div>`);
+    grid.appendChild(body);
+
+    if (!visible.length) body.appendChild(el(`<div class="empty">No projects match this filter.</div>`));
+
+    visible.forEach(p => {
+      const cls = statusClass[p.status] || 'ok';
+      const open = expanded.has(p.id);
+      const row = el(`<div class="row prow ${open ? 'open' : ''} ${selectedId === p.id ? 'sel' : ''}" data-id="${p.id}">
+        <div class="cell-left" title="Open project details">
+          <button class="chev" title="${open ? 'Hide' : 'Show'} parts">${CHEV}</button>
+          <span class="pname">${esc(p.customer)}</span>
+          <span class="pill ${cls}">${esc(p.status)}</span>
+        </div>
+        <div class="track" style="width:${width}px"></div>
+      </div>`);
+      const track = row.querySelector('.track');
+      track.appendChild(el(`<div class="due" style="left:${x(p.due)}px" data-label="Due ${fmt(p.due)}"></div>`));
+      const bar = el(`<div class="bar ${cls}" style="left:${x(p.start)}px;width:${(p.end - p.start) * dayPx}px" title="Project ${fmt(p.start)}–${fmt(p.end)}. Drag to move, or drag an end to change it"><i class="grip grip-l"></i><i class="grip grip-r"></i></div>`);
+      track.appendChild(bar);
+      row.querySelector('.chev').addEventListener('click', e => { e.stopPropagation(); open ? expanded.delete(p.id) : expanded.add(p.id); render(); });
+      row.querySelector('.cell-left').addEventListener('click', () => openPanel(p.id));
+      enableDrag(bar, p, dayPx);
+      body.appendChild(row);
+
+      if (open) {
+        p.components.forEach(c => {
+          const crow = el(`<div class="row crow">
+            <div class="cell-left"><span class="cname" title="${esc(c.name)}">${esc(c.name)}</span><span class="csrc">${esc(sourceLabel(c))}</span></div>
+            <div class="track" style="width:${width}px"></div>
+          </div>`);
+          const t = crow.querySelector('.track');
+          const dcls = dotClass(c);
+          t.appendChild(el(`<div class="dot ${dcls}" style="left:${x(c.eta) + dayPx / 2}px" title="${esc(c.name)}: ${esc(c.status)}, ${fmt(c.eta)}"></div>`));
+          t.appendChild(el(`<div class="dlabel ${dcls}" style="left:${x(c.eta) + dayPx / 2}px">${fmt(c.eta)}</div>`));
+          crow.querySelector('.cell-left').addEventListener('click', () => openPanel(p.id));
+          body.appendChild(crow);
+        });
+      }
+    });
+
+    // vertical week lines and today line, behind everything in the body
+    const lines = el(`<div style="position:absolute;top:0;bottom:0;left:var(--left);width:${width}px;pointer-events:none;z-index:1"></div>`);
+    for (let d = rangeStart; d < rangeEnd; d++) if (toDate(d).getUTCDay() === 1) lines.appendChild(el(`<div class="wline" style="left:${x(d)}px"></div>`));
+    lines.appendChild(el(`<div class="today-line" style="left:${x(todayDay)}px"></div>`));
+    body.prepend(lines);
+
+    app.appendChild(board);
+    app.appendChild(el(`<div class="legend">
+      <span><i class="lg-bar" style="background:var(--green)"></i>On track</span>
+      <span><i class="lg-bar" style="background:var(--red)"></i>Blocked</span>
+      <span><i class="lg-bar" style="background:var(--amber)"></i>Late</span>
+      <span><i class="lg-due"></i>Due date</span>
+    </div>`));
+
+    // keep the board scrolled near today on first paint, and preserve scroll on re-render
+    requestAnimationFrame(() => {
+      if (lastScroll) { board.scrollLeft = lastScroll.left; board.scrollTop = lastScroll.top; }
+      else board.scrollLeft = Math.max(0, Math.min(x(todayDay) - 60, x(Math.min(...state.projects.map(p => p.start))) - 24));
+      board.addEventListener('scroll', () => { lastScroll = { left: board.scrollLeft, top: board.scrollTop }; });
+    });
+    enablePan(board);
+    enableColumnResize(head.querySelector('.cell-left'));
+  }
+  let lastScroll = null;
+
+  // Click and drag on empty timeline space to scroll. Bars keep their own drag; touch keeps native scrolling.
+  function enablePan(board) {
+    let pan = null;
+    board.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || e.pointerType === 'touch') return;
+      if (e.target.closest('.bar, .cell-left')) return;
+      pan = { x: e.clientX, y: e.clientY, left: board.scrollLeft, top: board.scrollTop, id: e.pointerId };
+      board.setPointerCapture(e.pointerId);
+      board.classList.add('panning');
+      e.preventDefault();
+    });
+    board.addEventListener('pointermove', e => {
+      if (!pan) return;
+      if (!(e.buttons & 1)) { endPan(); return; }
+      board.scrollLeft = pan.left - (e.clientX - pan.x);
+      board.scrollTop = pan.top - (e.clientY - pan.y);
+    });
+    const endPan = () => {
+      if (!pan) return;
+      if (board.hasPointerCapture(pan.id)) board.releasePointerCapture(pan.id);
+      pan = null;
+      board.classList.remove('panning');
+    };
+    board.addEventListener('pointerup', endPan);
+    board.addEventListener('pointercancel', endPan);
+  }
+
+  // Drag the right edge of the customer column header to resize it; the width is remembered.
+  const LEFT_KEY = 'production-scheduler-left-col';
+  try { const w = parseInt(localStorage.getItem(LEFT_KEY), 10); if (w) document.documentElement.style.setProperty('--left', w + 'px'); } catch (e) {}
+  function enableColumnResize(headCell) {
+    const handle = headCell.appendChild(el('<div class="col-resize" title="Drag to resize"></div>'));
+    let start = null;
+    handle.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      start = { x: e.clientX, w: headCell.getBoundingClientRect().width };
+      handle.setPointerCapture(e.pointerId);
+      document.body.classList.add('resizing');
+      e.preventDefault(); e.stopPropagation();
+    });
+    handle.addEventListener('pointermove', e => {
+      if (!start) return;
+      const w = Math.round(Math.min(520, Math.max(140, start.w + e.clientX - start.x)));
+      document.documentElement.style.setProperty('--left', w + 'px');
+    });
+    const end = () => {
+      if (!start) return;
+      start = null;
+      document.body.classList.remove('resizing');
+      try { localStorage.setItem(LEFT_KEY, parseInt(getComputedStyle(document.documentElement).getPropertyValue('--left'), 10)); } catch (e) {}
+    };
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  }
+
+  // Drag the middle of a bar to move the whole project, or either end to change its start or end date.
+  // The tooltip just shows the new dates.
+  function enableDrag(bar, p, dayPx) {
+    let startX = 0, moved = false, delta = 0, tip = null, pressed = false, mode = 'move';
+    const origLeft = parseFloat(bar.style.left), origWidth = parseFloat(bar.style.width);
+    const newDates = () => ({
+      start: mode === 'end' ? p.start : Math.min(p.start + delta, mode === 'start' ? p.end - 1 : Infinity),
+      end: mode === 'start' ? p.end : Math.max(p.end + delta, mode === 'end' ? p.start + 1 : -Infinity),
+    });
+    bar.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      mode = e.target.classList.contains('grip-l') ? 'start' : e.target.classList.contains('grip-r') ? 'end' : 'move';
+      startX = e.clientX; moved = false; delta = 0; pressed = true;
+      bar.setPointerCapture(e.pointerId);
+    });
+    bar.addEventListener('pointermove', e => {
+      if (!pressed) return;
+      // a release we never saw (e.g. outside the window) ends the drag
+      if (!(e.buttons & 1)) { finish(e); return; }
+      const dx = e.clientX - startX;
+      if (!moved && Math.abs(dx) < 4) return;
+      if (!moved) { moved = true; bar.classList.add('dragging'); tip = document.body.appendChild(el('<div class="drag-tip"></div>')); }
+      delta = Math.round(dx / dayPx);
+      const d = newDates();
+      bar.style.left = (origLeft + (d.start - p.start) * dayPx) + 'px';
+      bar.style.width = (origWidth + ((d.end - p.end) - (d.start - p.start)) * dayPx) + 'px';
+      tip.innerHTML = `<b>${esc(fmt(d.start))} – ${esc(fmt(d.end))}</b>`;
+      tip.style.left = (e.clientX + 14) + 'px';
+      tip.style.top = (e.clientY + 16) + 'px';
+    });
+    const finish = e => {
+      if (!pressed) return;
+      pressed = false;
+      if (tip) { tip.remove(); tip = null; }
+      if (!moved) { if (e.type === 'pointerup') openPanel(p.id); return; }
+      bar.classList.remove('dragging');
+      if (delta !== 0) { Object.assign(p, newDates()); save(); }
+      render();
+    };
+    bar.addEventListener('pointerup', finish);
+    bar.addEventListener('pointercancel', finish);
+  }
+
+  // ======================= Side panel =======================
+  const panel = document.getElementById('panel');
+  const scrim = document.getElementById('scrim');
+  scrim.addEventListener('click', closePanel);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
+
+  function closePanel() {
+    if (!selectedId) return;
+    selectedId = null;
+    panel.classList.remove('show'); scrim.classList.remove('show'); panel.setAttribute('aria-hidden', 'true');
+    document.querySelectorAll('.prow.sel').forEach(r => r.classList.remove('sel'));
+  }
+
+  function openPanel(id) {
+    selectedId = id;
+    renderPanel();
+    panel.classList.add('show'); scrim.classList.add('show'); panel.setAttribute('aria-hidden', 'false');
+    document.querySelectorAll('.prow').forEach(r => r.classList.toggle('sel', r.dataset.id === id));
+  }
+
+  function renderPanel() {
+    const p = project(selectedId);
+    if (!p) return;
+    const rows = p.components.map(c => `
+      <div class="part-card">
+        <div class="fields">
+          <label class="field"><span>Part</span><input type="text" class="ctl" value="${esc(c.name)}" data-nid="${c.id}"></label>
+          <label class="field"><span>Shop or supplier</span><select class="ctl" data-wid="${c.id}">${sourceOptions(c)}</select></label>
+          <label class="field"><span>Estimated completion</span><input type="date" class="ctl" value="${toISO(c.eta)}" data-cid="${c.id}"></label>
+          <label class="field"><span>Status</span><select class="ctl pselect s-${stClass(c.status)}" data-sid="${c.id}">${options(partStatuses(c), c.status)}</select></label>
+        </div>
+        <div class="card-actions"><button type="button" class="btn-remove" data-rid="${c.id}">Remove part</button></div>
+      </div>`).join('');
+
+    panel.innerHTML = `
+      <div class="panel-head">
+        ${projectNo(p) ? `<div class="kicker">${esc(projectNo(p))}</div>` : ''}
+        <h3>${esc(p.customer)}</h3>
+        <div class="sub">${esc([p.title, p.site].filter(Boolean).join(' · '))}</div>
+        <button class="x" aria-label="Close">×</button>
+      </div>
+      <div class="panel-body">
+        <div class="section-title">Project</div>
+        <div class="part-card"><div class="fields">
+          <label class="field"><span>Project status</span><select class="ctl pselect s-${statusClass[p.status] || 'ok'}" id="pStatus">${options(PROJECT_STATUSES, p.status)}</select></label>
+          <label class="field"><span>Order value</span><input type="text" inputmode="numeric" class="ctl" id="pValue" value="${money(p.value)}"></label>
+          <label class="field"><span>Project number</span><input type="text" class="ctl" id="pNumber" value="${esc(projectNo(p))}" placeholder="e.g. 24117"></label>
+          <label class="field"><span>Product</span><input type="text" class="ctl" id="pTitle" value="${esc(p.title)}" placeholder="e.g. Model #3"></label>
+          <label class="field"><span>Customer</span><input type="text" class="ctl" id="pCustomer" value="${esc(p.customer)}"></label>
+          <label class="field"><span>Site</span><input type="text" class="ctl" id="pSite" value="${esc(p.site)}" placeholder="e.g. Tacoma, WA"></label>
+          <label class="field"><span>Project start</span><input type="date" class="ctl" id="pStart" value="${toISO(p.start)}"></label>
+          <label class="field"><span>Project end</span><input type="date" class="ctl" id="pEnd" value="${toISO(p.end)}"></label>
+          <label class="field full"><span>Customer due date</span><input type="date" class="ctl" id="pDue" value="${toISO(p.due)}"></label>
+        </div></div>
+        <div class="section-title">Parts</div>
+        <div class="parts">${rows}<button type="button" class="btn-add" id="addPart">+ Add part</button></div>
+        <div class="section-title">Assembly</div>
+        <div class="part-card"><div class="fields">
+          <label class="field full"><span>Shop</span><select class="ctl" id="pBuildShop">${SHOPS.map(s => `<option value="${s.id}" ${s.id === p.buildShop ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
+          <label class="field"><span>Estimated completion</span><input type="date" class="ctl" id="pBuildEta" value="${toISO(p.buildEta)}"></label>
+          <label class="field"><span>Status</span><select class="ctl pselect s-${stClass(p.assemblyStatus)}" id="pBuild">${options(SHOP_STATUSES, p.assemblyStatus)}</select></label>
+        </div></div>
+        <div class="card-actions panel-actions"><button type="button" class="btn-remove" id="removeProject">Remove project</button></div>
+      </div>`;
+    panel.querySelector('.x').addEventListener('click', closePanel);
+    // redraw after an edit without losing the reader's place in the panel
+    const update = () => {
+      const top = panel.querySelector('.panel-body').scrollTop;
+      save(); render(); renderPanel();
+      panel.querySelector('.panel-body').scrollTop = top;
+    };
+    panel.querySelectorAll('input[data-cid]').forEach(inp => inp.addEventListener('change', () => {
+      if (!inp.value) return;
+      p.components.find(c => c.id === inp.dataset.cid).eta = fromISO(inp.value);
+      update();
+    }));
+    panel.querySelector('#pValue').addEventListener('change', e => {
+      const v = parseInt(e.target.value.replace(/[^0-9]/g, ''), 10);
+      if (!isNaN(v)) p.value = v;
+      update();
+    });
+    panel.querySelectorAll('input[data-nid]').forEach(inp => inp.addEventListener('change', () => {
+      const name = inp.value.trim();
+      if (name) p.components.find(c => c.id === inp.dataset.nid).name = name;
+      update();
+    }));
+    panel.querySelectorAll('select[data-wid]').forEach(sel => sel.addEventListener('change', () => {
+      const c = p.components.find(c => c.id === sel.dataset.wid);
+      const [kind, who] = sel.value.split('|');
+      if (kind !== c.kind) {
+        // keep the status at the same stage when switching between a shop and a supplier
+        const i = partStatuses(c).indexOf(c.status);
+        c.kind = kind;
+        c.status = partStatuses(c)[Math.max(0, i)];
+      }
+      c.who = who;
+      update();
+    }));
+    panel.querySelector('#addPart').addEventListener('click', () => {
+      p.components.push({
+        id: 'c' + Date.now(), kind: 'shop', who: SHOPS[0].id,
+        name: 'Part #' + (Math.max(0, ...p.components.map(c => +(/^Part #(\d+)$/.exec(c.name) || [])[1] || 0)) + 1),
+        eta: Math.max(p.start, todayDay), status: SHOP_STATUSES[0],
+      });
+      update();
+      const cards = panel.querySelectorAll('.parts .part-card');
+      cards[cards.length - 1].scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+    panel.querySelectorAll('button[data-rid]').forEach(btn => btn.addEventListener('click', () => {
+      const c = p.components.find(c => c.id === btn.dataset.rid);
+      if (!confirm(`Remove ${c.name} from this project?`)) return;
+      p.components = p.components.filter(x => x !== c);
+      update();
+    }));
+    panel.querySelectorAll('select[data-sid]').forEach(sel => sel.addEventListener('change', () => {
+      p.components.find(c => c.id === sel.dataset.sid).status = sel.value;
+      update();
+    }));
+    panel.querySelector('#pStatus').addEventListener('change', e => { p.status = e.target.value; update(); });
+    panel.querySelector('#pBuild').addEventListener('change', e => { p.assemblyStatus = e.target.value; update(); });
+    panel.querySelector('#pBuildShop').addEventListener('change', e => { p.buildShop = e.target.value; update(); });
+    const textField = (id, key, fallback) => panel.querySelector(id).addEventListener('change', e => {
+      p[key] = e.target.value.trim() || fallback; update();
+    });
+    textField('#pCustomer', 'customer', 'New project');
+    textField('#pNumber', 'number', '');
+    textField('#pTitle', 'title', '');
+    textField('#pSite', 'site', '');
+    panel.querySelector('#removeProject').addEventListener('click', () => {
+      if (!confirm(`Remove ${p.customer}${projectNo(p) ? ` (${projectNo(p)})` : ''} and all its parts?`)) return;
+      state.projects = state.projects.filter(x => x !== p);
+      save(); closePanel(); render();
+    });
+    const dateField = (id, apply) => {
+      const inp = panel.querySelector(id);
+      inp.addEventListener('change', () => { if (inp.value) { apply(fromISO(inp.value)); update(); } });
+    };
+    dateField('#pStart', d => { const len = p.end - p.start; p.start = d; p.end = d + len; });
+    dateField('#pEnd', d => { p.end = Math.max(p.start + 1, d); });
+    dateField('#pDue', d => { p.due = d; });
+    dateField('#pBuildEta', d => { p.buildEta = d; });
+  }
+
+  // ======================= Department lead: queue =======================
+  function renderQueue(shopId) {
+    const items = [];
+    state.projects.forEach(p => {
+      if (p.buildShop === shopId) items.push({ p, label: 'Final assembly', start: p.start, date: p.buildEta, status: p.assemblyStatus, kind: 'build' });
+      p.components.filter(c => c.kind === 'shop' && c.who === shopId)
+        .forEach(c => items.push({ p, c, label: c.name, start: p.start, date: c.eta, status: c.status, kind: 'comp' }));
+    });
+    items.sort((m, n) => (m.status === 'Done') - (n.status === 'Done') || m.start - n.start || m.date - n.date);
+    const open = items.filter(i => i.status !== 'Done');
+    const inProg = open.filter(i => i.status === 'In progress');
+    const delayed = open.filter(i => i.status === 'Delayed');
+
+    app.appendChild(el(`<div class="queue-head">
+      <div><h2>${esc(shopName(shopId))} queue</h2>
+      <p>Read-only view of this shop's jobs, in order of project start. The controller sets all dates and statuses.</p></div>
+    </div>`));
+    app.appendChild(el(`<div class="summary">
+      <div class="stat" style="cursor:default"><div class="num">${open.length}</div><div class="lbl">Open jobs</div></div>
+      <div class="stat" style="cursor:default"><div class="num" style="color:#2F55B5">${inProg.length}</div><div class="lbl">In progress</div></div>
+      <div class="stat blocked" style="cursor:default"><div class="num">${delayed.length}</div><div class="lbl">Delayed</div></div>
+    </div>`));
+
+    const card = el(`<div class="qcard"><table class="qtable">
+      <thead><tr><th>#</th><th>Job</th><th>Project · customer</th><th>Project start</th><th>Estimated completion</th><th>Status</th></tr></thead>
+      <tbody></tbody></table></div>`);
+    const tb = card.querySelector('tbody');
+    if (!items.length) tb.appendChild(el(`<tr><td colspan="6" class="empty">No jobs for this shop.</td></tr>`));
+    let rank = 0;
+    items.forEach(i => {
+      const isDone = i.status === 'Done';
+      const tr = el(`<tr class="${i.status === 'Delayed' ? 'behind' : ''} ${isDone ? 'isdone' : ''}">
+        <td class="rank">${isDone ? '✓' : ++rank}</td>
+        <td><div class="item">${esc(i.label)}</div><div class="small">${esc(i.p.title)}</div></td>
+        <td><div>${esc(i.p.customer)}</div><div class="small">${esc([projectNo(i.p), i.p.site].filter(Boolean).join(' · '))}</div></td>
+        <td>${fmt(i.start)}</td>
+        <td>${fmt(i.date)}</td>
+        <td><span class="st ${stClass(i.status)}">${esc(i.status)}</span></td>
+      </tr>`);
+      tb.appendChild(tr);
+    });
+    app.appendChild(card);
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>
